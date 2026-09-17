@@ -33,42 +33,6 @@ class BPETokenizer:
         self.cpp_encoder = None
         self.cpp_trainer = None
 
-    def get_counts(self, tokens: list) -> Counter:
-        """Counts frequencies of all adjacent token pairs in a sequence.
-
-        Args:
-            tokens (list[int]): A list of integer token IDs.
-
-        Returns:
-            Counter: A Counter mapping adjacent token ID pairs `(token_a, token_b)` 
-            to their frequency counts in the sequence.
-        """
-        counts = Counter()
-        for pair in zip(tokens[:-1], tokens[1:]):
-            counts[pair] += 1
-        return counts
-
-    def merge_tokens(self, tokens: list, pair: tuple, new_id: int) -> list:
-        """Replaces all non-overlapping occurrences of a specific pair of tokens with a new token ID.
-
-        Args:
-            tokens (list[int]): The sequence of token IDs to perform merges on.
-            pair (tuple[int, int]): The target pair of adjacent token IDs to be merged.
-            new_id (int): The new integer token ID to replace the pair with.
-
-        Returns:
-            list[int]: The updated list of token IDs with target pairs replaced by `new_id`.
-        """
-        new_tokens = []
-        i = 0
-        while i < len(tokens):
-            if i < len(tokens) - 1 and (tokens[i], tokens[i+1]) == pair:
-                new_tokens.append(new_id)
-                i += 2
-            else:
-                new_tokens.append(tokens[i])
-                i += 1
-        return new_tokens
 
     def train_BPE(self,path:str = None,text:str = None,
                    vocab_size: int = 400,start_id: int = 256, 
@@ -249,19 +213,6 @@ class BPETokenizer:
             for pair,new_id in self.cpp_merge_table.items()
         }
 
-        # for k in range(additional_merges):
-        #     stats = self.get_stats(current_tokens)
-        #     if not stats:
-        #         break  
-
-        #     max_pair = max(stats, key=stats.get)
-        #     idx = start_idx + k
-
-
-        #     self.merge_table[max_pair] = idx
-        #     self.vocab[idx] = self.vocab[max_pair[0]] + self.vocab[max_pair[1]]
-
-        #     current_tokens = self.merge_tokens(current_tokens, max_pair, idx)
 
 
     def save(self, path="tokenizer.json"):
