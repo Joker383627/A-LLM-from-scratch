@@ -1,6 +1,7 @@
 from collections import Counter
 import json
 from .bpe_encoder import BPEEncoder
+from .bpe_trainer import BPETrainer
 
 class BPETokenizer:
     """Byte Pair Encoding (BPE) Tokenizer for text processing and compression.
@@ -16,7 +17,7 @@ class BPETokenizer:
         vocab (dict[int, bytes]): Mapping of token IDs (0 to vocab_size-1) to their corresponding byte sequences.
     """
 
-    def __init__(self, path: str = None, token_number: int = int(5e5)):
+    def __init__(self):
         """Initializes the BPETokenizer instance.
 
         If a file path is provided, reads the text file and converts up to `token_number` 
@@ -26,19 +27,11 @@ class BPETokenizer:
             path (str, optional): Path to the text file used for training initialization. Defaults to None.
             token_number (int, optional): Maximum number of bytes to read from the file for training. 
                 Defaults to 500000.
-        """
-        if path:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                self.text = f.read()[:token_number]
-            utf_bytes = self.text.encode("utf-8")
-            self.tokens = list(utf_bytes) if token_number is not None else list(utf_bytes)
-        else:
-            self.text = ""
-            self.tokens = []
-            
+        """ 
         self.merge_table = {}
-        self.vocab = {ids: bytes([ids]) for ids in range(256)}
+        self.vocab = {}
         self.cpp_encoder = None
+        self.cpp_trainer = None
 
     def get_counts(self, tokens: list) -> Counter:
         """Counts frequencies of all adjacent token pairs in a sequence.
@@ -77,7 +70,9 @@ class BPETokenizer:
                 i += 1
         return new_tokens
 
-    def train_BPE(self, vocab_size: int = 400, return_token_length: bool = False):
+    def train_BPE(self,path:str = None,text:str = None,
+                   vocab_size: int = 400,start_id: int = 256, 
+                   return_token_length: bool = False):
         """Trains the BPE tokenizer by iteratively merging the most frequent adjacent token pairs.
 
         Continually scans the token sequence, identifies the most common pair, assigns a new 
@@ -99,28 +94,46 @@ class BPETokenizer:
         """
         assert vocab_size > 256, "Vocab size must be greater than 256"
 
+        if text is None:
+            if path is not None:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+            else:
+                raise ValueError("Path or Text must be provided")
+
+        raw_bytes = text.encode("utf-8", errors="replace")
+
+        raw_bytes = text.encode("utf-8", errors="replace")
+        self.tokens = list(raw_bytes)
+
         tokens = list(self.tokens)
-        num_merges = vocab_size - 256
 
-        for k in range(num_merges):
-            stats = self.get_counts(tokens)
-            if not stats:
-                break 
 
-            max_pair = max(stats, key=stats.get)
-            idx = 256 + k
+        self.cpp_trainer = BPETrainer()
+        tokens = self.cpp_trainer.train_bpe(tokens,vocab_size,start_id)
 
-            self.merge_table[max_pair] = idx
-            self.vocab[idx] = self.vocab[max_pair[0]] + self.vocab[max_pair[1]]
-            
-            tokens = self.merge_tokens(tokens, max_pair, idx)
+        self.cpp_vocab = self.cpp_trainer.get_vocab()
+        self.cpp_merge_table = self.cpp_trainer.get_merge_table()
 
-        # return (self.merge_table, self.vocab, len(tokens)) if return_token_length else (self.merge_table, self.vocab)
+        self.vocab = {
+            int(token_id):bytes(byte_values)
+            for token_id,byte_values in self.cpp_vocab.items()
+        }
 
+        self.merge_table = {
+            tuple(pair): int(new_id)
+            for pair,new_id in self.cpp_merge_table.items()
+        }
+
+        self.tokens = tokens
+        if return_token_length:
+            return len(tokens)
 
     def build_cpp_encoder(self):
         pairs = []
         ids = []
+
+        self.merge_table = dict(sorted(self.merge_table.items(),key = lambda x: x[1]))
 
         for pair, new_id in self.merge_table.items():
             pairs.append(pair)
@@ -128,8 +141,9 @@ class BPETokenizer:
 
         self.cpp_encoder = BPEEncoder(pairs, ids)
 
-
-    def encode_text(self, text: str = None, path: str = None, return_text: bool = False, max_bytes: int = int(5e5)):
+    def encode_text(self, text: str = None, path: str = None, 
+                    return_text: bool = False, 
+                    max_bytes: int = int(5e5)):
         """Encodes string input or file contents into a sequence of BPE token IDs.
 
         Applies learned BPE merge rules stored in `self.merge_table` sequentially to 
@@ -184,7 +198,9 @@ class BPETokenizer:
         byte_string = b"".join(self.vocab[token_id] for token_id in tokens)
         return byte_string.decode("utf-8", errors="replace")
 
-    def continue_training(self, path: str = None, text: str = None, additional_merges: int = 500, max_chars: int = int(5e5)):
+    def continue_training(self, path: str = None, text: str = None, 
+                          vocab_size : int = None, 
+                          max_chars: int = int(5e5)):
         """Continues BPE training on a new corpus without resetting existing vocabulary.
 
         First encodes the new corpus using all existing merge rules in `self.merge_table`, 
@@ -199,34 +215,53 @@ class BPETokenizer:
         Raises:
             ValueError: If neither `text` nor `path` is provided.
         """
-        if text is not None:
-            raw_text = text[:max_chars]
-        elif path is not None:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                raw_text = f.read()[:max_chars]
-        else:
-            raise ValueError("Path or Text must be provided")
+        if text is None:
+            if path is not None:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+            else:
+                raise ValueError("Path or Text must be provided")
 
+        current_tokens = list(text.encode("utf-8", errors="replace"))
 
-        current_tokens = list(raw_text.encode("utf-8", errors="replace"))
+        # tokens = list(current_tokens)
+
+        self.cpp_trainer.set_vocab(self.cpp_vocab)
+        self.cpp_trainer.set_merge_table(self.cpp_merge_table)
+
         for pair, merge_id in self.merge_table.items():
-            current_tokens = self.merge_tokens(current_tokens, pair, merge_id)
+            current_tokens = self.cpp_trainer.merge_token(current_tokens, pair, merge_id)
 
-        start_idx = max(self.vocab.keys()) + 1
+        start_id = max(self.vocab.keys()) + 1
 
-        for k in range(additional_merges):
-            stats = self.get_stats(current_tokens)
-            if not stats:
-                break  
+        tokens = self.cpp_trainer.train_bpe(current_tokens,vocab_size,start_id)
 
-            max_pair = max(stats, key=stats.get)
-            idx = start_idx + k
+        self.cpp_vocab = self.cpp_trainer.get_vocab()
+        self.cpp_merge_table = self.cpp_trainer.get_merge_table()
+
+        self.vocab = {
+            int(token_id):bytes(byte_values)
+            for token_id,byte_values in self.cpp_vocab.items()
+        }
+
+        self.merge_table = {
+            tuple(pair): int(new_id)
+            for pair,new_id in self.cpp_merge_table.items()
+        }
+
+        # for k in range(additional_merges):
+        #     stats = self.get_stats(current_tokens)
+        #     if not stats:
+        #         break  
+
+        #     max_pair = max(stats, key=stats.get)
+        #     idx = start_idx + k
 
 
-            self.merge_table[max_pair] = idx
-            self.vocab[idx] = self.vocab[max_pair[0]] + self.vocab[max_pair[1]]
+        #     self.merge_table[max_pair] = idx
+        #     self.vocab[idx] = self.vocab[max_pair[0]] + self.vocab[max_pair[1]]
 
-            current_tokens = self.merge_tokens(current_tokens, max_pair, idx)
+        #     current_tokens = self.merge_tokens(current_tokens, max_pair, idx)
 
 
     def save(self, path="tokenizer.json"):
@@ -247,7 +282,6 @@ class BPETokenizer:
 
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f)
-
 
     @classmethod
     def load(cls, path="tokenizer.json"):

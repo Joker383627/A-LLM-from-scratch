@@ -1,42 +1,21 @@
-path = "/home/tuhin/python_codes/Tiny LLM/data/tokenizer_train.txt"
-train_text_1 = open("/home/tuhin/python_codes/Tiny LLM/data/AllCombined.txt").read()
-train_text_2 = open("/home/tuhin/python_codes/Tiny LLM/data/bpe_training_100k.txt").read()
+path_1 = "/home/tuhin/python_codes/Tiny LLM/data/ptb/ptb.train.txt" #(5mb text file)
+path_2 = "/home/tuhin/python_codes/Tiny LLM/data/AllCombined.txt"
 
-from tokenizer import BPETokenizer
+from Tokenizer.tokenizer_modified import BPETokenizer
 
-tokenizer = BPETokenizer(path = path)
-tokenizer.train_BPE(vocab_size=1000)
+tok = BPETokenizer()
 
-offset = int(1e5)
-for i in range(12):
-    tokenizer.continue_training(text = train_text_1[i*offset:(i+1)*offset])
+size = tok.train_BPE(path = path_1,vocab_size=4500,return_token_length=True)
 
-tokenizer.continue_training(text = train_text_2)
+train_text_2 = open(path_2).read()[:int(3e6)] #only taking 3x10^6 chars
+offset = int(5e5)
+tok.continue_training(None,train_text_2[:offset],7500,None) # increase the vocabulary
 
+current_voc_size = len(tok.vocab)
 
-test_text = "hello my name is Tuhin , I love machine learning."
+# increase the vocabulary more
+for i in range(5):
+    tok.continue_training(None,train_text_2[(i+1)*offset:(i+2)*offset],current_voc_size +(i+1)*1000 ,None)
 
-utf_enc = test_text.encode(errors="replace")
-my_enc = tokenizer.encode_text(text= test_text)
-decoded = tokenizer.decode_encoding(my_enc)
-
-print(decoded == test_text)
-print(f"compression : {len(my_enc)/len(utf_enc)}")
-
-
-tokenizer.save("tokenizer.json")
-
-
-
-loaded = BPETokenizer.load("tokenizer.json")
-
-text = "The Standard Model describes fundamental particles."
-
-a = tokenizer.encode_text(text)
-b = loaded.encode_text(text)
-
-assert a == b
-assert tokenizer.decode_encoding(a) == loaded.decode_encoding(b)
-
-print("Tokenizer successfully saved and loaded.")
-print("Vocabulary:", len(loaded.vocab))
+# save the learned vocabulary and the merge table(unsorted)
+tok.save(path = "/home/tuhin/python_codes/Tiny LLM/Tokenizer/new_tok.json")
