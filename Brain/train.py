@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from pathlib import Path
 
 from Brain.preprocess import TextDataset
 from Brain.transformer import Transformer
@@ -68,16 +69,18 @@ def train_one_epoch(model:nn.Module,dataloader:DataLoader,optimizer: torch.optim
     return avg_loss
 
 def main():
+    TRAIN_PATH = Path(__file__).resolve().parent.parent /"data" /"WikipediaCorpus"/ "tarin_corpus.txt"
+    VALID_PATH = Path(__file__).resolve().parent.parent /"data" /"WikipediaCorpus"/ "valid_corpus.txt"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     train_dataset = TextDataset(
-        path = "/home/tuhin/python_codes/Tiny LLM/data/WikipediaCorpus/train_corpus.txt",
+        path = TRAIN_PATH,
         context_length=CONTEXT_LENGTH,
         stride = 1)
 
     validation_dataset = TextDataset(
-        path = "/home/tuhin/python_codes/Tiny LLM/data/WikipediaCorpus/valid_corpus.txt",
+        path = VALID_PATH,
         context_length=CONTEXT_LENGTH,
         stride = 1)
 
