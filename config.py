@@ -1,0 +1,13 @@
+
+# Tokenizer / data
+VOCAB_SIZE = 12500
+CONTEXT_LENGTH = 256
+
+# Model
+D_MODEL = 384
+N_HEADS = 8
+N_LAYERS = 6
+
+# Training
+BATCH_SIZE = 32
+LEARNING_RATE = 3e-4
