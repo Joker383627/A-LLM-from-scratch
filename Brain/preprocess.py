@@ -1,8 +1,14 @@
+from pathlib import Path
 import torch
-from torch.utils.data import Dataset,DataLoader
+from torch.utils.data import Dataset
 from Tokenizer.tokenizer import BPETokenizer
 
-tokenizer = BPETokenizer.load("/home/tuhin/python_codes/Tiny LLM/Tokenizer/new_tok.json")
+TOKENIZER_PATH = Path(__file__).resolve().parent.parent /"Tokenizer" / "new_tok.json"
+
+tokenizer = BPETokenizer.load(TOKENIZER_PATH)
+# tokenizer = BPETokenizer.load("/home/tuhin/python_codes/Tiny LLM/Tokenizer/new_tok.json")
+
+print(TOKENIZER_PATH)
 
 class TextDataset(Dataset):
 
