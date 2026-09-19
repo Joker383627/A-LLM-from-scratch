@@ -69,7 +69,7 @@ def train_one_epoch(model:nn.Module,dataloader:DataLoader,optimizer: torch.optim
     return avg_loss
 
 def main():
-    TRAIN_PATH = Path(__file__).resolve().parent.parent /"data" /"WikipediaCorpus"/ "tarin_corpus.txt"
+    TRAIN_PATH = Path(__file__).resolve().parent.parent /"data" /"WikipediaCorpus"/ "train_corpus.txt"
     VALID_PATH = Path(__file__).resolve().parent.parent /"data" /"WikipediaCorpus"/ "valid_corpus.txt"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
