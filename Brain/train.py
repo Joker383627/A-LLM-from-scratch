@@ -77,12 +77,12 @@ def main():
     train_dataset = TextDataset(
         path = TRAIN_PATH,
         context_length=CONTEXT_LENGTH,
-        stride = 1)
+        stride = 128)
 
     validation_dataset = TextDataset(
         path = VALID_PATH,
         context_length=CONTEXT_LENGTH,
-        stride = 1)
+        stride = 128)
 
 
     train_loader = DataLoader(train_dataset,BATCH_SIZE,True)
