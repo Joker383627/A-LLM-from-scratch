@@ -34,7 +34,7 @@ class Transformer(nn.Module):
 
     def forward(self,x):
         B,T = x.shape
-        mask = self.mask
+        mask = self.mask[:T,:T]
         position = torch.arange(0,T,device=x.device)
 
         x = self.token_embedding(x) + self.position_embedding(position)  #shape ---> (B,T,D)
