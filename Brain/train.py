@@ -27,6 +27,8 @@ def train(model:nn.Module,
               f"train loss: {avg_train_loss:.4f} | " 
               f"valid_loss: {avg_validation_loss:.4f}\n" )
 
+        return avg_train_loss
+
 @torch.no_grad()
 def evaluate(model:nn.Module,dataloader:DataLoader,device = "cpu"):
 
