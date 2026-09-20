@@ -15,9 +15,13 @@ def train(model:nn.Module,
           train_loader:DataLoader,
           valid_loader:DataLoader,
           optimizer:torch.optim,
-          device = "cpu"):
+          device = "cpu",
+          patience = 1):
 
     model.train()
+
+    best_validation_loss = float("inf")
+    patience_counter = 0
 
     for epoch in range(epochs):
         avg_train_loss = train_one_epoch(model,train_loader,optimizer,device)
@@ -27,7 +31,17 @@ def train(model:nn.Module,
               f"train loss: {avg_train_loss:.4f} | " 
               f"valid_loss: {avg_validation_loss:.4f}\n" )
 
-        return avg_train_loss
+        if avg_validation_loss < best_validation_loss:
+            best_validation_loss = avg_validation_loss
+
+            patience_counter = 0
+            torch.save(model.state_dict(),"best_model_params.pt")
+            print("best model saved")
+
+        else:
+            patience_counter += 1
+            if patience_counter > patience:
+                break
 
 @torch.no_grad()
 def evaluate(model:nn.Module,dataloader:DataLoader,device = "cpu"):
