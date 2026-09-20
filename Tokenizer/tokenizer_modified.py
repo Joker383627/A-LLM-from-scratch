@@ -105,7 +105,7 @@ class BPETokenizer:
 
         self.cpp_encoder = BPEEncoder(pairs, ids)
 
-    def encode_text(self, text: str = None, path: str = None, 
+    def encode(self, text: str = None, path: str = None, 
                     return_text: bool = False, 
                     max_bytes: int = int(5e5)):
         """Encodes string input or file contents into a sequence of BPE token IDs.
@@ -147,7 +147,7 @@ class BPETokenizer:
 
         return (tokens, text) if return_text else tokens
 
-    def decode_encoding(self, tokens: list) -> str:
+    def decode(self, tokens: list) -> str:
         """Decodes a sequence of BPE token IDs back into a UTF-8 string.
 
         Maps each token ID back to its original byte sequence via `self.vocab`, concatenates 

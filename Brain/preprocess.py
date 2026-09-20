@@ -25,7 +25,7 @@ class TextDataset(Dataset):
             self.text = text
 
         self.tokenizer = tokenizer
-        self.encoding = torch.tensor(self.tokenizer.encode_text(self.text,None,False,len(self.text)))
+        self.encoding = torch.tensor(self.tokenizer.encode(self.text,None,False,len(self.text)))
 
         self.input_id = self.encoding[:-1].unfold(0,context_length,stride)
         self.target_id = self.encoding[1:].unfold(0,context_length,stride)
