@@ -1,5 +1,34 @@
+# Python
 __pycache__/
-*.pyc
-*.pdf
-*.so
+*.py[cod]
+*$py.class
+
+# IDE
 .vscode/
+
+*.pdf
+ddp.py
+ddp_2.py
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Model checkpoints / weights
+checkpoints/
+*.pt
+
+
+# Training datasets
+data/
+*.bin
+
+# Compiled extensions
+*.so
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+# .DS_Store

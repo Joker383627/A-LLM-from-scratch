@@ -1,138 +1,167 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from pathlib import Path
+import torch.distributed as dist
 
-from Brain.preprocess import TextDataset
-from Brain.transformer import Transformer
+from Brain.checkpoints import save_checkpoint
 
-from config import VOCAB_SIZE,LEARNING_RATE as LR,CONTEXT_LENGTH,BATCH_SIZE
+# def train(model:nn.Module,
+#           epochs:int,
+#           train_loader:DataLoader,
+#           valid_loader:DataLoader,
+#           optimizer:torch.optim,
+#           device = "cpu",
+#           patience = 1):
 
+#     model.train()
 
-def train(model:nn.Module,
-          epochs:int,
-          train_loader:DataLoader,
-          valid_loader:DataLoader,
-          optimizer:torch.optim,
-          device = "cpu",
-          patience = 1):
+#     best_validation_loss = float("inf")
+#     patience_counter = 0
 
-    model.train()
-
-    best_validation_loss = float("inf")
-    patience_counter = 0
-
-    for epoch in range(epochs):
-        avg_train_loss = train_one_epoch(model,train_loader,optimizer,device)
-        avg_validation_loss = evaluate(model,valid_loader,device)
+#     for epoch in range(epochs):
+#         avg_train_loss = train_one_epoch(model,train_loader,optimizer,device)
+#         avg_validation_loss = evaluate(model,valid_loader,device)
         
-        print( f"\nEpoch {epoch + 1} complete | " 
-              f"train loss: {avg_train_loss:.4f} | " 
-              f"valid_loss: {avg_validation_loss:.4f}\n" )
+#         print( f"\nEpoch {epoch + 1} complete | " 
+#               f"train loss: {avg_train_loss:.4f} | " 
+#               f"valid_loss: {avg_validation_loss:.4f}\n" )
 
-        if avg_validation_loss < best_validation_loss:
-            best_validation_loss = avg_validation_loss
+#         if avg_validation_loss < best_validation_loss:
+#             best_validation_loss = avg_validation_loss
 
-            patience_counter = 0
-            torch.save(model.state_dict(),"best_model_params.pt")
-            print("best model saved")
+#             patience_counter = 0
+#             torch.save(model.state_dict(),"best_model_params.pt")
+#             print("best model saved")
 
-        else:
-            patience_counter += 1
-            if patience_counter > patience:
-                break
+#         else:
+#             patience_counter += 1
+#             if patience_counter > patience:
+#                 break
 
 @torch.no_grad()
-def evaluate(model:nn.Module,dataloader:DataLoader,device = "cpu"):
-
+def evaluate(model, dataloader, device):
     model.eval()
-
     total_loss = 0.0
-    for x,y in dataloader:
-        x = x.to(device)         
-        y = y.to(device)
 
-        logits = model(x)[0]
+    for x, y in dataloader:
+        x = x.to(device, non_blocking=True)
+        y = y.to(device, non_blocking=True)
 
-        loss = F.cross_entropy(logits.reshape(-1,VOCAB_SIZE),y.reshape(-1))
+        with torch.autocast(device_type="cuda", dtype=torch.float16):
+            loss = model(x, y)
 
         total_loss += loss.item()
 
-    return total_loss/len(dataloader)
+    total = torch.tensor(total_loss, device=device, dtype=torch.float64)
+    count = torch.tensor(len(dataloader), device=device, dtype=torch.float64)
 
-def train_one_epoch(model:nn.Module,dataloader:DataLoader,optimizer: torch.optim,device = "cpu"):
+    dist.all_reduce(total, op=dist.ReduceOp.SUM)
+    dist.all_reduce(count, op=dist.ReduceOp.SUM)
+
+    return (total / count).item()
+
+def train_one_epoch(model, dataloader, optimizer, device, scaler,
+                    accumulation_steps=1, start_batch=0,
+                    checkpoint_every=20000, checkpoint_path=None,
+                    epoch=0, best_valid_loss=float("inf")):
+
     model.train()
     total_loss = 0.0
-    for batch_index,(x,y) in enumerate(dataloader):
-       x = x.to(device)
-       y = y.to(device)
+    optimizer.zero_grad(set_to_none=True)
 
-       optimizer.zero_grad()
+    for batch_index, (x, y) in enumerate(dataloader):
 
-       logits = model(x)[0]
+        if batch_index < start_batch:
+            continue
 
-       loss = F.cross_entropy(logits.reshape(-1,VOCAB_SIZE),y.reshape(-1))
+        x = x.to(device, non_blocking=True)
+        y = y.to(device, non_blocking=True)
 
-       loss.backward()
-       optimizer.step()
+        is_accumulating = (batch_index + 1) % accumulation_steps != 0
 
-       total_loss += loss.item()
-       if batch_index % 100 == 0: 
-           print(f"Batch {batch_index} | " f"Loss {loss.item():.4f}" )
-    avg_loss = total_loss/len(dataloader)
+        with torch.autocast(device_type="cuda", dtype=torch.float16):
+            loss = model(x, y) / accumulation_steps
 
-    return avg_loss
+        if is_accumulating:
+            with model.no_sync():
+                scaler.scale(loss).backward()
+        else:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad(set_to_none=True)
 
-def main():
-    TRAIN_PATH = Path(__file__).resolve().parent.parent /"data" /"WikipediaCorpus"/ "train_corpus.txt"
-    VALID_PATH = Path(__file__).resolve().parent.parent /"data" /"WikipediaCorpus"/ "valid_corpus.txt"
+        actual_loss = loss.item() * accumulation_steps
+        total_loss += actual_loss
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+        if batch_index % 100 == 0 and dist.get_rank() == 0:
+            print(f"Batch {batch_index} | Loss {actual_loss:.4f}", flush=True)
 
-    train_dataset = TextDataset(
-        path = TRAIN_PATH,
-        context_length=CONTEXT_LENGTH,
-        stride = 128)
+        if (checkpoint_path is not None
+                and batch_index > 0
+                and batch_index % checkpoint_every == 0):
 
-    validation_dataset = TextDataset(
-        path = VALID_PATH,
-        context_length=CONTEXT_LENGTH,
-        stride = 128)
+            dist.barrier()
+            save_checkpoint(
+                checkpoint_path, model, optimizer, scaler,
+                epoch, batch_index + 1, best_valid_loss
+            )
+            dist.barrier()
+
+    if len(dataloader) % accumulation_steps != 0:
+        scaler.step(optimizer)
+        scaler.update()
+        optimizer.zero_grad(set_to_none=True)
+
+    return total_loss / len(dataloader)
+
+# def main():
+#     TRAIN_PATH = Path(__file__).resolve().parent.parent /"data" /"WikipediaCorpus"/ "train_corpus.txt"
+#     VALID_PATH = Path(__file__).resolve().parent.parent /"data" /"WikipediaCorpus"/ "valid_corpus.txt"
+
+#     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+#     train_dataset = TextDataset(
+#         path = TRAIN_PATH,
+#         context_length=CONTEXT_LENGTH,
+#         stride = 128)
+
+#     validation_dataset = TextDataset(
+#         path = VALID_PATH,
+#         context_length=CONTEXT_LENGTH,
+#         stride = 128)
 
 
-    train_loader = DataLoader(train_dataset,BATCH_SIZE,True)
-    valid_loader = DataLoader(validation_dataset,BATCH_SIZE,False)
+#     train_loader = DataLoader(train_dataset,BATCH_SIZE,True)
+#     valid_loader = DataLoader(validation_dataset,BATCH_SIZE,False)
 
-    model = Transformer(
-        emb_dim=384,
-        num_heads=8,
-        dropout=0.2,
-        num_layers=6
-    ).to(device)
+#     model = Transformer(
+#         emb_dim=384,
+#         num_heads=8,
+#         dropout=0.2,
+#         num_layers=6
+#     ).to(device)
 
-    optimizer = torch.optim.AdamW(
-        params=model.parameters(),
-        lr = LR
-        )
+#     optimizer = torch.optim.AdamW(
+#         params=model.parameters(),
+#         lr = LR
+#         )
 
-    train(
-        model = model,
-        epochs = 4,
-        train_loader=train_loader,
-        valid_loader=valid_loader,
-        optimizer=optimizer,
-        device = device
-        )
+#     train(
+#         model = model,
+#         epochs = 4,
+#         train_loader=train_loader,
+#         valid_loader=valid_loader,
+#         optimizer=optimizer,
+#         device = device
+#         )
 
-    torch.save(
-        model.state_dict(),
-        "model_checkpoint.pt"
-    )
+#     torch.save(
+#         model.state_dict(),
+#         "model_checkpoint.pt"
+#     )
 
-    print("\nModel Saved")
+#     print("\nModel Saved")
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
 
 
